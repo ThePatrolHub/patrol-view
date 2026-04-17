@@ -1044,10 +1044,6 @@ function App() {
               Sign out
             </button>
           </div>
-          <div className="pending-note">
-            Admin setup tip: after your first signup, open Firestore and set your own user document fields to
-            <code> approved: true </code> and <code> role: "admin" </code>.
-          </div>
         </GlassCard>
       </div>
     );
