@@ -244,10 +244,10 @@ function usePatrolTracker(profile: UserProfile | null, pushToast: (title: string
         if (error.code === 1) {
           setGpsWarning('Location permission was denied. Enable GPS/location and try again.');
         } else {
-          setGpsWarning('Unable to get a live GPS fix. Check that GPS and data are enabled.');
+          setGpsWarning('Live GPS update is delayed. Keep the page open, wait a few seconds, and make sure precise location is allowed in your browser settings.');
         }
       },
-      { enableHighAccuracy: true, maximumAge: 3000, timeout: 15000 }
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 }
     );
   }, [profile]);
 
@@ -266,6 +266,10 @@ function usePatrolTracker(profile: UserProfile | null, pushToast: (title: string
 
   const startPatrol = useCallback(async () => {
     if (!profile) return;
+    if (!window.isSecureContext) {
+      setGpsWarning('Location only works on a secure HTTPS page. Open the GitHub Pages link, not a local file or insecure preview.');
+      return;
+    }
     if (!navigator.geolocation) {
       setGpsWarning('This browser does not support GPS tracking.');
       return;
@@ -279,7 +283,7 @@ function usePatrolTracker(profile: UserProfile | null, pushToast: (title: string
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           enableHighAccuracy: true,
           maximumAge: 0,
-          timeout: 15000,
+          timeout: 30000,
         });
       });
 
@@ -329,7 +333,7 @@ function usePatrolTracker(profile: UserProfile | null, pushToast: (title: string
         setGpsWarning(
           geoError.code === 1
             ? 'GPS/location permission is blocked. Enable it on your device and browser to start a patrol.'
-            : 'No reliable GPS fix yet. Make sure GPS and mobile data are on, then try again.'
+            : 'No reliable GPS fix yet. Wait a little longer, move somewhere with a clearer sky view, and make sure precise location is allowed for this site.'
         );
       } else {
         const message = error instanceof Error ? error.message : 'Could not start patrol.';
@@ -376,6 +380,10 @@ function usePatrolTracker(profile: UserProfile | null, pushToast: (title: string
 
   const requestAssistance = useCallback(async () => {
     if (!profile) return;
+    if (!window.isSecureContext) {
+      setGpsWarning('Location only works on a secure HTTPS page. Open the GitHub Pages link, not a local file or insecure preview.');
+      return;
+    }
     setPatrolBusy(true);
 
     try {
@@ -389,7 +397,7 @@ function usePatrolTracker(profile: UserProfile | null, pushToast: (title: string
             navigator.geolocation.getCurrentPosition(resolve, reject, {
               enableHighAccuracy: true,
               maximumAge: 0,
-              timeout: 12000,
+              timeout: 20000,
             });
           }).then((position) => ({
             lat: position.coords.latitude,
