@@ -42,7 +42,7 @@ export function AuthScreen({ onLogin, onRegister }: AuthScreenProps) {
         <div className="auth-panel__glow" />
         <div className="auth-panel__content">
           <span className="eyebrow">Patrol Hub</span>
-          <h1>Community patrol tracking that feels clean, fast, and simple.</h1>
+          <h1>LNW Patrol Map.</h1>
           <p>
             Live patrol map, active patrollers list, assistance alerts, route planning, and a message board.
           </p>
@@ -127,21 +127,6 @@ export function AuthScreen({ onLogin, onRegister }: AuthScreenProps) {
               {loading ? 'Working...' : mode === 'login' ? 'Log in' : 'Create pending account'}
             </button>
           </form>
-
-          <div className="auth-notes">
-            <div>
-              <strong>Approval flow</strong>
-              <span>Every new account is created as pending until an admin approves it.</span>
-            </div>
-            <div>
-              <strong>Names + mentions</strong>
-              <span>Display names can include spaces. Type @ in the board to pick a person from the suggestions list.</span>
-            </div>
-            <div>
-              <strong>GPS note</strong>
-              <span>You can still view the map without GPS, but starting a patrol requires location access.</span>
-            </div>
-          </div>
         </div>
       </div>
     </div>
