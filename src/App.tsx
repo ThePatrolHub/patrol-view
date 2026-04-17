@@ -12,6 +12,7 @@ import {
   Timestamp,
   updateDoc,
   where,
+  writeBatch,
   runTransaction,
   type Unsubscribe,
 } from 'firebase/firestore';
