@@ -44,6 +44,7 @@ import type {
   BoardPost,
   MentionRecord,
   PatrolPoint,
+  PatrolRecord,
   PlannedRoute,
   ToastMessage,
   UserProfile,
@@ -130,6 +131,15 @@ async function fetchWalkRouteSegment(start: { lat: number; lng: number }, end: {
 function flattenDraftRouteSegments(segments: Array<Array<{ lat: number; lng: number }>>) {
   return segments.flatMap((segment, index) => (index === 0 ? segment : segment.slice(1)));
 }
+
+function formatPatrolDateTime(value?: Timestamp | null) {
+  if (!value) return 'Unknown time';
+  return value.toDate().toLocaleString([], {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+}
+
 
 function usePatrolTracker(profile: UserProfile | null, pushToast: (title: string, body: string) => void): PatrolTrackerResult {
   const [viewerRoute, setViewerRoute] = useState<PatrolPoint[]>([]);
@@ -483,6 +493,9 @@ function App() {
   const [mentionableUsers, setMentionableUsers] = useState<UserProfile[]>([]);
   const [selectedPatroller, setSelectedPatroller] = useState<UserProfile | null>(null);
   const [selectedPatrollerRoute, setSelectedPatrollerRoute] = useState<PatrolPoint[]>([]);
+  const [patrolHistory, setPatrolHistory] = useState<PatrolRecord[]>([]);
+  const [historyRoutePatrolId, setHistoryRoutePatrolId] = useState<string | null>(null);
+  const [historyRoutePoints, setHistoryRoutePoints] = useState<PatrolPoint[]>([]);
   const [draftRouteName, setDraftRouteName] = useState('Evening Patrol Route');
   const [draftRouteAnchors, setDraftRouteAnchors] = useState<Array<{ lat: number; lng: number }>>([]);
   const [draftRouteSegments, setDraftRouteSegments] = useState<Array<Array<{ lat: number; lng: number }>>>([]);
@@ -674,6 +687,15 @@ function App() {
       })
     );
 
+    unsubscribers.push(
+      onSnapshot(query(collection(db, 'patrols'), where('userId', '==', profile.uid), limit(100)), (snapshot) => {
+        const nextPatrols = snapshot.docs
+          .map((docSnap) => fromDoc<PatrolRecord>(docSnap))
+          .sort((a, b) => (b.startedAt?.toMillis() ?? 0) - (a.startedAt?.toMillis() ?? 0));
+        setPatrolHistory(nextPatrols);
+      })
+    );
+
     if (profile.role === 'admin') {
       unsubscribers.push(
         onSnapshot(
@@ -701,6 +723,20 @@ function App() {
       }
     );
   }, [selectedPatroller?.currentPatrolId]);
+
+  useEffect(() => {
+    if (!historyRoutePatrolId) {
+      setHistoryRoutePoints([]);
+      return;
+    }
+
+    return onSnapshot(
+      query(collection(db, `patrols/${historyRoutePatrolId}/points`), orderBy('recordedAt', 'asc'), limit(500)),
+      (snapshot) => {
+        setHistoryRoutePoints(snapshot.docs.map((docSnap) => fromDoc<PatrolPoint>(docSnap)));
+      }
+    );
+  }, [historyRoutePatrolId]);
 
   const seenAlertIds = useRef<Set<string>>(new Set());
   const seenMentionIds = useRef<Set<string>>(new Set());
@@ -1079,6 +1115,44 @@ function App() {
 
   const focusedUser = selectedPatroller ?? profile;
 
+  const patrolSummary = useMemo(() => {
+    const now = new Date();
+    let day = 0;
+    let month = 0;
+    let year = 0;
+
+    patrolHistory.forEach((patrol) => {
+      const startedAt = patrol.startedAt?.toDate();
+      if (!startedAt) return;
+
+      const duration =
+        patrol.active && profile?.currentPatrolId === patrol.id
+          ? patrolTracker.elapsedSeconds
+          : patrol.durationSeconds ?? 0;
+
+      if (
+        startedAt.getFullYear() === now.getFullYear()
+        && startedAt.getMonth() === now.getMonth()
+        && startedAt.getDate() === now.getDate()
+      ) {
+        day += duration;
+      }
+
+      if (
+        startedAt.getFullYear() === now.getFullYear()
+        && startedAt.getMonth() === now.getMonth()
+      ) {
+        month += duration;
+      }
+
+      if (startedAt.getFullYear() === now.getFullYear()) {
+        year += duration;
+      }
+    });
+
+    return { day, month, year };
+  }, [patrolHistory, profile?.currentPatrolId, patrolTracker.elapsedSeconds]);
+
   if (authLoading) {
     return (
       <div className="loading-screen">
@@ -1128,7 +1202,6 @@ function App() {
         <div>
           <span className="eyebrow">Patrol Hub</span>
           <h1>Live patrol command view</h1>
-          <p>Matte black UI, live patrol map, quick alerts, planned routes, and a shared message board.</p>
         </div>
 
         <div className="topbar-actions">
@@ -1216,7 +1289,7 @@ function App() {
                 alerts={alerts}
                 plannedRoutes={plannedRoutes}
                 viewerRoute={patrolTracker.viewerRoute}
-                selectedPatrollerRoute={selectedPatrollerRoute}
+                selectedPatrollerRoute={historyRoutePoints.length ? historyRoutePoints : selectedPatrollerRoute}
                 draftRoutePoints={draftRoutePoints}
                 draftRouteAnchors={draftRouteAnchors}
                 drawMode={drawMode}
@@ -1258,6 +1331,67 @@ function App() {
                 <small>{draftRouteAnchors.length} stop(s) selected · {draftRoutePoints.length} road points in the current draft route.</small>
               </div>
             </GlassCard>
+
+            <GlassCard
+              title="Patrol history"
+              subtitle="This is where you view previous routes and your tracked time totals for today, this month, and this year."
+            >
+              <div className="route-tools">
+                <div className="stat-row">
+                  <StatPill label="Today" value={formatDuration(patrolSummary.day)} />
+                  <StatPill label="This month" value={formatDuration(patrolSummary.month)} />
+                  <StatPill label="This year" value={formatDuration(patrolSummary.year)} />
+                </div>
+
+                <div className="stack-list compact-list">
+                  {patrolHistory.length ? (
+                    patrolHistory.slice(0, 12).map((patrol) => {
+                      const duration =
+                        patrol.active && profile.currentPatrolId === patrol.id
+                          ? patrolTracker.elapsedSeconds
+                          : patrol.durationSeconds ?? 0;
+
+                      return (
+                        <div
+                          key={patrol.id}
+                          className={`alert-card ${historyRoutePatrolId === patrol.id ? 'history-card--active' : ''}`}
+                        >
+                          <div>
+                            <strong>{formatPatrolDateTime(patrol.startedAt)}</strong>
+                            <p>
+                              {patrol.active
+                                ? 'Patrol still active'
+                                : patrol.endedAt
+                                  ? `Ended ${formatPatrolDateTime(patrol.endedAt)}`
+                                  : 'Patrol completed'}
+                            </p>
+                            <span>{formatDuration(duration)}</span>
+                          </div>
+                          <div className="action-row action-row--wrap">
+                            <button
+                              className="ghost-button"
+                              onClick={() => {
+                                if (historyRoutePatrolId === patrol.id) {
+                                  setHistoryRoutePatrolId(null);
+                                  return;
+                                }
+
+                                setSelectedPatroller(null);
+                                setHistoryRoutePatrolId(patrol.id);
+                              }}
+                            >
+                              {historyRoutePatrolId === patrol.id ? 'Hide route' : 'Show route'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="empty-state">No saved patrols yet. Start and end a patrol to begin building route history.</div>
+                  )}
+                </div>
+              </div>
+            </GlassCard>
           </div>
 
           <div className="dashboard-side">
@@ -1268,7 +1402,10 @@ function App() {
                     <button
                       key={user.uid}
                       className={`stack-item ${selectedPatroller?.uid === user.uid ? 'stack-item--active' : ''}`}
-                      onClick={() => setSelectedPatroller(user)}
+                      onClick={() => {
+                        setHistoryRoutePatrolId(null);
+                        setSelectedPatroller(user);
+                      }}
                     >
                       <div className="stack-item__avatar" style={{ background: user.avatarColor }}>
                         {getUserDisplayName(user).slice(0, 1).toUpperCase()}
@@ -1445,16 +1582,6 @@ function App() {
                 <div className="empty-state">No pending accounts.</div>
               )}
             </div>
-          </GlassCard>
-
-          <GlassCard title="First admin bootstrap" subtitle="Only needed for the first account in a brand new Firebase project.">
-            <ol className="setup-list">
-              <li>Create the first account from the login screen.</li>
-              <li>Open Firebase Console → Firestore Database → users → your UID document.</li>
-              <li>Set <code>approved</code> to <code>true</code>.</li>
-              <li>Set <code>role</code> to <code>admin</code>.</li>
-              <li>Refresh the app and the Admin tab will appear.</li>
-            </ol>
           </GlassCard>
         </div>
       ) : null}
