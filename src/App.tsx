@@ -496,6 +496,17 @@ function App() {
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission
   );
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const isiOS = useMemo(() => {
+    if (typeof navigator === 'undefined') return false;
+    return /iPad|iPhone|iPod/.test(navigator.userAgent)
+      || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  }, []);
+  const isStandalonePwa = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    const standaloneNavigator = navigator as Navigator & { standalone?: boolean };
+    return window.matchMedia?.('(display-mode: standalone)').matches
+      || Boolean(standaloneNavigator.standalone);
+  }, []);
   const [pageVisibility, setPageVisibility] = useState(() =>
     typeof document === 'undefined' ? 'visible' : document.visibilityState
   );
@@ -514,6 +525,10 @@ function App() {
     }, 4200);
   }, []);
 
+  const syncNotificationPermission = useCallback(() => {
+    setNotificationPermission(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission);
+  }, []);
+
   const patrolTracker = usePatrolTracker(profile, pushToast);
 
   useEffect(() => {
@@ -526,6 +541,16 @@ function App() {
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
+
+  useEffect(() => {
+    syncNotificationPermission();
+    window.addEventListener('focus', syncNotificationPermission);
+    document.addEventListener('visibilitychange', syncNotificationPermission);
+    return () => {
+      window.removeEventListener('focus', syncNotificationPermission);
+      document.removeEventListener('visibilitychange', syncNotificationPermission);
+    };
+  }, [syncNotificationPermission]);
 
   useEffect(() => {
     if (!profile?.isPatrolling || !profile.currentPatrolId) {
@@ -866,13 +891,59 @@ function App() {
   }, []);
 
   const requestNotificationPermission = useCallback(async () => {
-    if (typeof Notification === 'undefined') return;
+    if (typeof Notification === 'undefined') {
+      if (isiOS && !isStandalonePwa) {
+        pushToast(
+          'Install to Home Screen first',
+          'On iPhone and iPad, web notifications only work after you add this site to your Home Screen and open it from there.'
+        );
+        return;
+      }
+
+      pushToast(
+        'Notifications unavailable',
+        'This mobile browser does not support web notifications for this site. Try Chrome or Firefox on Android, or a Home Screen install on iPhone/iPad.'
+      );
+      return;
+    }
+
+    if (isiOS && !isStandalonePwa) {
+      pushToast(
+        'Install to Home Screen first',
+        'On iPhone and iPad, Safari only allows web notification prompts for Home Screen web apps.'
+      );
+      return;
+    }
+
+    if (Notification.permission === 'denied') {
+      setNotificationPermission('denied');
+      pushToast('Notifications blocked', 'Open your browser site settings and allow notifications for this site.');
+      return;
+    }
+
     const permission = await Notification.requestPermission();
     setNotificationPermission(permission);
+
     if (permission === 'granted') {
+      try {
+        new Notification('LNW Patrol Map', { body: 'Notifications are enabled on this device.' });
+      } catch {
+        // Some mobile browsers grant permission but do not show a test notification reliably.
+      }
       pushToast('Notifications enabled', 'You will now see alert and mention notifications while the app is open.');
+      return;
     }
-  }, [pushToast]);
+
+    if (permission === 'denied') {
+      pushToast('Notifications blocked', 'Open your browser site settings and allow notifications for this site.');
+      return;
+    }
+
+    pushToast(
+      'No notification permission yet',
+      'Your browser did not show or complete a notification prompt. On some phones this only works in supported browsers or installed web apps.'
+    );
+  }, [isStandalonePwa, isiOS, pushToast]);
 
   const approveUser = useCallback(async (uid: string) => {
     await updateDoc(doc(db, 'users', uid), {
@@ -1063,7 +1134,13 @@ function App() {
         <div className="topbar-actions">
           <button className="ghost-button" onClick={requestNotificationPermission}>
             <Bell size={16} />
-            {notificationPermission === 'granted' ? 'Notifications on' : 'Enable notifications'}
+            {notificationPermission === 'unsupported'
+              ? 'Notifications unavailable'
+              : notificationPermission === 'granted'
+                ? 'Notifications on'
+                : notificationPermission === 'denied'
+                  ? 'Notifications blocked'
+                  : 'Enable notifications'}
           </button>
           <button className="ghost-button" onClick={handleLogout}>
             <LogOut size={16} />
